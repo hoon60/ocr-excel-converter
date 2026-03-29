@@ -97,6 +97,20 @@ def _build_demand_forecast_prompt() -> str:
 - 합계 행의 열 합산은 총참여금액 합계와 같아야 합니다.
 
 **핵심**: 각 회사의 총참여금액 = 해당 행의 스프레드 열 숫자 합계여야 합니다.
+
+## 출력 예시 (이런 형태로 반환해야 합니다!)
+```
+{
+  "metadata": {"title": "한솔테크닉스(BBB+) 제93-2회 수요예측 결과", "info": [["사채만기","2년"],["모집금액","150억원"]], "market_info": [["개별민평","4.658"],["국고","3.190"]]},
+  "headers": ["회사명","부서명","이름","계정","최종참여일시","총참여금액","-100","-66","-60","-56","-50","-46","-40","-30","-20","-10","0","+10","+20","+30"],
+  "rows": [
+    ["에이펙스자산운용","주식운용부문","송혜인","집합","2026-03-16 15:52","20","20","","","","","","","","","","","","",""],
+    ["교보악사자산운용","채권운용팀","최지민","특별","2026-03-16 16:05","50","","","","","50","","","","","","","","",""],
+    ["합계","","","","","530","20","","","","50","","30","50","30","40","180","80","",""]
+  ]
+}
+```
+**주의**: 스프레드 열(-100, -66, ... +30)이 표에 몇 개가 있든, 헤더에 보이는 열은 전부 headers에 포함해야 합니다. 빈 열도 생략하지 마세요.
 """)
 
     # 학습된 교정 힌트 — 개인 이름(name)은 다른 이름 오인식 유발 가능성이 높아 제외
@@ -236,8 +250,19 @@ def _inject_metadata_hint(meta_patterns: dict, doc_type: str) -> str:
 def estimate_doc_type_from_image(
     width_px: int,
     height_px: int,
+    ocr_text: str | None = None,
 ) -> str | None:
-    """이미지 비율로 문서 타입을 추정한다. (aspect > 2.5 = 수요예측표)"""
-    if height_px > 0 and width_px / height_px > 2.5:
+    """이미지 비율 + OCR 키워드로 문서 타입을 추정한다."""
+    # 키워드 기반 (가장 정확)
+    if ocr_text:
+        demand_keywords = {"수요예측", "총참여금액", "참여금액", "모집밴드", "스프레드", "최종참여일시"}
+        financial_keywords = {"유동자산", "비유동자산", "자산총계", "부채총계", "자본총계"}
+        if any(k in ocr_text for k in demand_keywords):
+            return "demand_forecast"
+        if any(k in ocr_text for k in financial_keywords):
+            return "financial_statement"
+
+    # 비율 기반 (수요예측표는 보통 가로로 넓음)
+    if height_px > 0 and width_px / height_px > 1.8:
         return "demand_forecast"
     return None

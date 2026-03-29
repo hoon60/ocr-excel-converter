@@ -118,14 +118,28 @@ def run_pipeline(
     metadata: dict = {}
     engine_used = "rapidocr"
 
-    # ── [통합1] 이미지 크기 기반 문서 타입 사전 추정 → 동적 프롬프트 생성 ──
+    # ── [통합1] 이미지 크기 + OCR 키워드 기반 문서 타입 추정 → 동적 프롬프트 ──
     pre_doc_type = None
     dynamic_prompt = None
     if use_ai and ext in IMAGE_EXTENSIONS:
         try:
             from .prompt_builder import build_prompt, estimate_doc_type_from_image
             img_w, img_h = _get_image_size(file_path)
-            pre_doc_type = estimate_doc_type_from_image(img_w, img_h)
+            # 빠른 OCR 스캔으로 키워드 추출 (문서 타입 추정용)
+            ocr_hint_text = None
+            try:
+                from .paddle_engine import _get_ocr, _imread_unicode
+                _quick_img = _imread_unicode(file_path)
+                if _quick_img is not None:
+                    _quick_ocr = _get_ocr()
+                    _quick_raw = _quick_ocr.ocr(file_path, cls=False)
+                    if _quick_raw and _quick_raw[0]:
+                        ocr_hint_text = " ".join(
+                            item[1][0] for item in _quick_raw[0][:30]
+                        )
+            except Exception:
+                pass
+            pre_doc_type = estimate_doc_type_from_image(img_w, img_h, ocr_hint_text)
             dynamic_prompt = build_prompt(doc_type=pre_doc_type, image_width_px=img_w)
         except Exception:
             pass

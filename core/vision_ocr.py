@@ -742,6 +742,7 @@ def extract_with_vision(
             result = extract_with_groq(
                 image_path, groq_key,
                 progress_cb=lambda p: progress_cb(40 + int(p * 0.3)) if progress_cb else None,
+                prompt_override=prompt_override,
             )
 
         # 교차검증: 로컬 신뢰도가 충분할 때만

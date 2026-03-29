@@ -160,13 +160,13 @@ def extract_with_paddle(
     if progress_cb:
         progress_cb(50)
 
-    # ── 좌표 기반 추출 (기본) + 격자 기반 헤더 복원 (보조) ──
+    # ── 좌표 기반 추출 (기본, 안정적) + 격자 정보로 헤더 복원 (보조) ──
     df, metadata = _coordinate_based_extraction(boxes, img)
 
     if df is None or df.empty:
         return None
 
-    # 격자 기반 헤더 복원: Col_N placeholder가 있을 때만 격자 정보로 보강
+    # 격자 정보로 헤더 복원 (Col_N placeholder가 있을 때)
     try:
         import re as _re
         has_placeholder = any(_re.match(r"^Col_\d+$", str(c).strip()) for c in df.columns)
@@ -175,9 +175,8 @@ def extract_with_paddle(
             cells = detect_table_cells(img)
             if cells:
                 grid_rows, grid_cols = get_grid_dimensions(cells)
-                if grid_cols >= df.shape[1]:
-                    df = _restore_spread_headers(df, cells, img, boxes)
-                    print(f"[PaddleOCR] 격자 기반 헤더 복원 ({grid_rows}x{grid_cols})")
+                df = _restore_spread_headers(df, cells, img, boxes)
+                print(f"[PaddleOCR] 격자 기반 헤더 복원 ({grid_rows}x{grid_cols})")
     except Exception as e:
         print(f"[PaddleOCR] 헤더 복원 실패 (무시): {e}")
 
