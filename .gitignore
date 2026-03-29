@@ -1,0 +1,60 @@
+config.json
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+
+# Build artifacts
+build/
+dist/
+dist_release/
+build_release/
+*.spec.bak
+*.log
+
+# OCR models (downloaded at runtime, too large for git)
+.EasyOCR/
+.paddleocr/
+.paddlex/
+models/*.onnx
+models/*.pdiparams
+models/*.pdmodel
+models/*.pdiparams.info
+
+# Data
+data/patterns.db
+
+# Test outputs
+qa_*.xlsx
+verify_*.xlsx
+test_*.xlsx
+*_변환결과.xlsx
+*_AI보정_변환결과.xlsx
+hansol_*.xlsx
+samsung_*.xlsx
+*_report.txt
+
+# Claude
+.claude/
+
+# Benchmark outputs
+benchmark_outputs/
+
+# Test/verify scripts and files
+haetae_*.txt
+v*_cols.txt
+verify_*.txt
+verify_*.py
+test_groq.py
+test_pipeline.py
+test_samsung_real.py
+samsung_dart_financial.png
+한진_수요예측1.jpg
+
+# OS
+.DS_Store
+Thumbs.db

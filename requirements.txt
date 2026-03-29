@@ -1,0 +1,30 @@
+# Python 3.10 권장
+# OCR 엔진
+rapidocr-onnxruntime>=1.3.0
+easyocr>=1.7.1
+paddleocr>=2.8.1
+
+# PDF 처리
+pdfplumber>=0.10.0
+PyMuPDF>=1.23.0
+
+# 이미지 표 감지
+img2table>=1.2.0
+opencv-python>=4.8.0
+
+# 데이터 처리 + Excel
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# AI 보정 (선택)
+groq>=0.4.0
+google-genai>=1.0.0
+
+# 학습/분류
+scikit-learn>=1.3.0
+
+# GUI
+PySide6>=6.6.0
+
+# 패키징 (개발용)
+pyinstaller>=6.0.0
