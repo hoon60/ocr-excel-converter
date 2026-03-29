@@ -55,6 +55,9 @@ test_samsung_real.py
 samsung_dart_financial.png
 한진_수요예측1.jpg
 
+# Temporary crop files
+_crop_*.png
+
 # OS
 .DS_Store
 Thumbs.db
