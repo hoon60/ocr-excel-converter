@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["...", "libGL", "libglib"]
+
+[phases.install]
+cmds = ["pip install -r requirements-web.txt"]
+
+[start]
+cmd = "python web_server.py"

@@ -785,18 +785,16 @@ def extract_with_vision(
         # 로컬 전용 모드
         return local_result
 
-    # ── ③ Groq API (텍스트 열 교차검증) ──
-    result = None
+    # ── ③ Groq API (무료, 기본) ──
     need_split = _should_split_image(image_path)
-
-    if engine in ("auto", "groq"):
+    if not result and engine in ("auto", "groq"):
         if consensus_runs > 1 and not need_split:
             try:
                 from .consensus import consensus_extract
                 result = consensus_extract(
                     image_path, groq_key,
                     num_runs=consensus_runs,
-                    progress_cb=lambda p: progress_cb(40 + int(p * 0.3)) if progress_cb else None,
+                    progress_cb=lambda p: progress_cb(50 + int(p * 0.2)) if progress_cb else None,
                     prompt_override=prompt_override,
                 )
             except Exception as e:
@@ -820,11 +818,11 @@ def extract_with_vision(
         if not result:
             result = extract_with_groq(
                 image_path, groq_key,
-                progress_cb=lambda p: progress_cb(40 + int(p * 0.3)) if progress_cb else None,
+                progress_cb=lambda p: progress_cb(50 + int(p * 0.2)) if progress_cb else None,
                 prompt_override=prompt_override,
             )
 
-        # 교차검증: 로컬 신뢰도가 충분할 때만
+        # 교차검증
         if (
             result and local_result and local_confidence >= 0.75
             and not flags.disable_entity_corrections
@@ -832,34 +830,29 @@ def extract_with_vision(
         ):
             result = _cross_validate(local_result, result)
 
-    # ── ④ Gemini API (최후 수단, 한도 체크) ──
+    # ── ④ Gemini API (무료 일 20회) ──
     if not result and engine in ("auto", "gemini"):
         if _check_gemini_quota():
             result = extract_with_gemini(image_path, gemini_api_key,
-                                         progress_cb=lambda p: progress_cb(70 + int(p * 0.2)) if progress_cb else None,
+                                         progress_cb=lambda p: progress_cb(60 + int(p * 0.15)) if progress_cb else None,
                                          prompt_override=prompt_override)
             if result:
                 _increment_gemini_usage()
-            if (
-                result and local_result and local_confidence >= 0.75
-                and not flags.disable_entity_corrections
-                and not flags.disable_db_corrections
-            ):
-                result = _cross_validate(local_result, result)
+                print("[Gemini] 추출 성공")
         else:
             print("[Gemini] 일일 한도 초과 → 건너뜀")
 
-    # ── ⑤ GPT-4o (비용 최적화: 다른 API 모두 실패 시에만) ──
+    # ── ⑤ GPT-4o-mini (유료 최후 수단, ~$0.003/이미지) ──
     if not result and engine in ("auto", "gpt4o"):
         openai_key = _load_openai_key()
         if openai_key:
             result = extract_with_gpt4o(
                 image_path, openai_key,
-                progress_cb=lambda p: progress_cb(80 + int(p * 0.15)) if progress_cb else None,
+                progress_cb=lambda p: progress_cb(75 + int(p * 0.15)) if progress_cb else None,
                 prompt_override=prompt_override,
             )
             if result:
-                print("[GPT-4o] 추출 성공")
+                print("[GPT-4o-mini] 추출 성공 (유료)")
 
     if not result:
         # EasyOCR 결과라도 반환
