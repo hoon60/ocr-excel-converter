@@ -785,64 +785,60 @@ def extract_with_vision(
         # 로컬 전용 모드
         return local_result
 
-    # ── ③ Groq API (무료, 기본) ──
+    # ── ③ Gemini (무료 일 20회, 우선) + Groq (무료, 보조) ──
+    gemini_result = None
+    groq_result = None
     need_split = _should_split_image(image_path)
-    if not result and engine in ("auto", "groq"):
-        if consensus_runs > 1 and not need_split:
-            try:
-                from .consensus import consensus_extract
-                result = consensus_extract(
-                    image_path, groq_key,
-                    num_runs=consensus_runs,
-                    progress_cb=lambda p: progress_cb(50 + int(p * 0.2)) if progress_cb else None,
-                    prompt_override=prompt_override,
-                )
-            except Exception as e:
-                print(f"[Consensus] 합의 투표 실패: {e}")
 
-        if not result and need_split:
-            parts = _split_image(image_path)
-            if len(parts) == 2:
-                left_result = extract_with_groq(parts[0], groq_key)
-                right_result = extract_with_groq(parts[1], groq_key)
-                for p in parts:
-                    try:
-                        os.unlink(p)
-                    except OSError:
-                        pass
-                if left_result and right_result:
-                    merged = _merge_split_results(left_result[0][0], right_result[0][0])
-                    meta = left_result[1] or right_result[1]
-                    result = ([merged], meta)
-
-        if not result:
-            result = extract_with_groq(
-                image_path, groq_key,
-                progress_cb=lambda p: progress_cb(50 + int(p * 0.2)) if progress_cb else None,
-                prompt_override=prompt_override,
-            )
-
-        # 교차검증
-        if (
-            result and local_result and local_confidence >= 0.75
-            and not flags.disable_entity_corrections
-            and not flags.disable_db_corrections
-        ):
-            result = _cross_validate(local_result, result)
-
-    # ── ④ Gemini API (무료 일 20회) ──
+    # Gemini 먼저 (한국어 표 인식 품질 우수)
     if not result and engine in ("auto", "gemini"):
         if _check_gemini_quota():
-            result = extract_with_gemini(image_path, gemini_api_key,
-                                         progress_cb=lambda p: progress_cb(60 + int(p * 0.15)) if progress_cb else None,
-                                         prompt_override=prompt_override)
-            if result:
+            gemini_result = extract_with_gemini(
+                image_path, gemini_api_key,
+                progress_cb=lambda p: progress_cb(40 + int(p * 0.15)) if progress_cb else None,
+                prompt_override=prompt_override,
+            )
+            if gemini_result:
                 _increment_gemini_usage()
                 print("[Gemini] 추출 성공")
+                result = gemini_result
         else:
             print("[Gemini] 일일 한도 초과 → 건너뜀")
 
-    # ── ⑤ GPT-4o-mini (유료 최후 수단, ~$0.003/이미지) ──
+    # Groq 보조 (무료, Gemini 실패 시 또는 교차검증용)
+    if engine in ("auto", "groq"):
+        if not result:
+            # Gemini 실패 → Groq를 메인으로
+            groq_result = extract_with_groq(
+                image_path, groq_key,
+                progress_cb=lambda p: progress_cb(55 + int(p * 0.15)) if progress_cb else None,
+                prompt_override=prompt_override,
+            )
+            if groq_result:
+                print("[Groq] 추출 성공")
+                result = groq_result
+        elif gemini_result:
+            # Gemini 성공 → Groq로 교차검증
+            try:
+                groq_result = extract_with_groq(
+                    image_path, groq_key,
+                    prompt_override=prompt_override,
+                )
+                if groq_result:
+                    result = _cross_validate_api_results(gemini_result, groq_result)
+                    print("[교차검증] Gemini + Groq 병합 완료")
+            except Exception:
+                pass  # 교차검증 실패 시 Gemini 결과 유지
+
+    # 로컬 결과와도 교차검증
+    if (
+        result and local_result and local_confidence >= 0.75
+        and not flags.disable_entity_corrections
+        and not flags.disable_db_corrections
+    ):
+        result = _cross_validate(local_result, result)
+
+    # ── ④ GPT-4o-mini (유료 최후 수단, ~$0.003/이미지) ──
     if not result and engine in ("auto", "gpt4o"):
         openai_key = _load_openai_key()
         if openai_key:
@@ -883,6 +879,54 @@ def extract_with_vision(
     _cache_result(file_hash, phash, result)
 
     return result
+
+
+def _cross_validate_api_results(
+    result_a: tuple,
+    result_b: tuple,
+) -> tuple:
+    """두 API 결과를 교차검증하여 더 많은 열/행을 가진 결과를 기반으로 병합.
+
+    전략: 열이 더 많은 결과를 BASE로, 일치하는 셀은 확정, 불일치하면 BASE 우선.
+    """
+    try:
+        dfs_a, meta_a = result_a
+        dfs_b, meta_b = result_b
+
+        if not dfs_a or not dfs_b:
+            return result_a if dfs_a else result_b
+
+        df_a, df_b = dfs_a[0], dfs_b[0]
+
+        # 열이 더 많은 쪽을 BASE로
+        if df_b.shape[1] > df_a.shape[1]:
+            base_df, aux_df = df_b.copy(), df_a
+            meta = meta_b or meta_a
+        else:
+            base_df, aux_df = df_a.copy(), df_b
+            meta = meta_a or meta_b
+
+        # 보조 결과에서 BASE에 없는 값 보완
+        n_rows = min(len(base_df), len(aux_df))
+        n_cols = min(base_df.shape[1], aux_df.shape[1])
+
+        filled = 0
+        for ri in range(n_rows):
+            for ci in range(n_cols):
+                base_val = str(base_df.iloc[ri, ci]).strip()
+                aux_val = str(aux_df.iloc[ri, ci]).strip()
+
+                # BASE가 비어있고 보조에 값이 있으면 채움
+                if (not base_val or base_val in ("", "nan")) and aux_val and aux_val not in ("", "nan"):
+                    base_df.iloc[ri, ci] = aux_val
+                    filled += 1
+
+        if filled > 0:
+            print(f"[교차검증] {filled}개 빈 셀 보완")
+
+        return ([base_df], meta)
+    except Exception:
+        return result_a
 
 
 def _cross_validate(
