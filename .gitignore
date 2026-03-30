@@ -24,6 +24,7 @@ models/*.onnx
 models/*.pdiparams
 models/*.pdmodel
 models/*.pdiparams.info
+models/korean_PP-OCRv3_rec_infer/
 
 # Data
 data/patterns.db
