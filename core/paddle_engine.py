@@ -160,25 +160,31 @@ def extract_with_paddle(
     if progress_cb:
         progress_cb(50)
 
-    # ── 좌표 기반 추출 (기본, 안정적) + 격자 정보로 헤더 복원 (보조) ──
-    df, metadata = _coordinate_based_extraction(boxes, img)
+    # ── 격자 + 박스 매핑 (가장 정확) → 폴백: 좌표 기반 ──
+    df, metadata = None, {}
+    try:
+        from .table_detector import detect_table_cells, get_grid_dimensions
+        cells = detect_table_cells(img)
+        if cells:
+            grid_rows, grid_cols = get_grid_dimensions(cells)
+            if grid_rows >= 3 and grid_cols >= 7:
+                df, metadata = _grid_based_extraction(boxes, cells, grid_rows, grid_cols, img)
+                if df is not None and not df.empty and df.shape[1] >= 7:
+                    # 헤더 복원
+                    df = _restore_spread_headers(df, cells, img, boxes)
+                    print(f"[PaddleOCR] 격자+박스 매핑 ({grid_rows}x{grid_cols}, {df.shape[1]}열)")
+                else:
+                    df, metadata = None, {}
+    except Exception as e:
+        print(f"[PaddleOCR] 격자 매핑 실패: {e}")
+        df, metadata = None, {}
+
+    # 폴백: 좌표 기반 추출
+    if df is None or df.empty or df.shape[1] < 5:
+        df, metadata = _coordinate_based_extraction(boxes, img)
 
     if df is None or df.empty:
         return None
-
-    # 격자 정보로 헤더 복원 (Col_N placeholder가 있을 때)
-    try:
-        import re as _re
-        has_placeholder = any(_re.match(r"^Col_\d+$", str(c).strip()) for c in df.columns)
-        if has_placeholder:
-            from .table_detector import detect_table_cells, get_grid_dimensions
-            cells = detect_table_cells(img)
-            if cells:
-                grid_rows, grid_cols = get_grid_dimensions(cells)
-                df = _restore_spread_headers(df, cells, img, boxes)
-                print(f"[PaddleOCR] 격자 기반 헤더 복원 ({grid_rows}x{grid_cols})")
-    except Exception as e:
-        print(f"[PaddleOCR] 헤더 복원 실패 (무시): {e}")
 
     if progress_cb:
         progress_cb(70)
@@ -341,6 +347,20 @@ def _extract_metadata(boxes: list[dict], header_y: float) -> dict:
         elif any(kw in text for kw in ("개별민평", "국고", "Spread")):
             metadata["market_info"].append(text)
     return metadata
+
+
+def _find_header_row_in_cells(
+    cell_texts: dict[tuple[int, int], str],
+    grid_rows: int,
+    grid_cols: int,
+) -> int:
+    """셀 텍스트에서 '회사명' 등 헤더 키워드가 있는 행을 찾는다."""
+    header_keywords = {"회사명", "부서명", "이름", "계정", "회사", "기관명"}
+    for r in range(min(5, grid_rows)):
+        row_text = " ".join(cell_texts.get((r, c), "") for c in range(grid_cols))
+        if any(kw in row_text for kw in header_keywords):
+            return r
+    return 0
 
 
 # ── 스프레드 헤더 복원 ──

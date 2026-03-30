@@ -341,6 +341,82 @@ def extract_header_texts_from_cells(
     return results
 
 
+def extract_all_cells_by_crop(
+    img: np.ndarray,
+    cells: list[dict],
+) -> dict[tuple[int, int], str]:
+    """격자의 모든 셀을 crop하여 PaddleOCR로 개별 인식한다.
+
+    어두운 배경 셀은 반전 처리 후 인식.
+    빈 셀은 빈 문자열로 반환.
+
+    Returns:
+        {(row, col): text} — 모든 셀 포함
+    """
+    if not cells:
+        return {}
+
+    try:
+        from .paddle_engine import _get_ocr
+        ocr = _get_ocr()
+    except Exception:
+        return {}
+
+    results = {}
+    for cell in cells:
+        r, c = cell["row"], cell["col"]
+        x1 = max(0, cell["x_min"] + 2)  # 격자선 안쪽
+        y1 = max(0, cell["y_min"] + 2)
+        x2 = min(img.shape[1], cell["x_max"] - 2)
+        y2 = min(img.shape[0], cell["y_max"] - 2)
+
+        if x2 - x1 < 5 or y2 - y1 < 5:
+            results[(r, c)] = ""
+            continue
+
+        crop = img[y1:y2, x1:x2]
+
+        # 어두운 배경 감지 → 반전
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
+        mean_val = np.mean(gray)
+
+        if mean_val < 100:
+            # 매우 어두운 배경: 반전 + 이진화
+            inv = cv2.bitwise_not(gray)
+            _, thresh = cv2.threshold(inv, 127, 255, cv2.THRESH_BINARY)
+            crop = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
+        elif mean_val < 140:
+            # 중간 어두운 배경: 반전만
+            gray = cv2.bitwise_not(gray)
+            crop = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        # 빈 셀 감지: 어두운 픽셀이 거의 없으면 빈 셀
+        gray_check = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
+        dark_ratio = np.sum(gray_check < 128) / max(gray_check.size, 1)
+        if dark_ratio < 0.005:
+            results[(r, c)] = ""
+            continue
+
+        # 작은 crop은 3배 확대 (PaddleOCR 최소 해상도 필요)
+        h_crop, w_crop = crop.shape[:2]
+        if h_crop < 30 or w_crop < 60:
+            scale = max(3, 30 // max(h_crop, 1))
+            crop = cv2.resize(crop, (w_crop * scale, h_crop * scale),
+                              interpolation=cv2.INTER_CUBIC)
+
+        try:
+            raw = ocr.ocr(crop, cls=False)
+            if raw and raw[0]:
+                text = " ".join(item[1][0] for item in raw[0]).strip()
+                results[(r, c)] = text
+            else:
+                results[(r, c)] = ""
+        except Exception:
+            results[(r, c)] = ""
+
+    return results
+
+
 def detect_header_colors(
     img: np.ndarray,
     cells: list[dict],

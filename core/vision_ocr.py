@@ -399,6 +399,85 @@ def extract_with_groq(
         return None
 
 
+# ── GPT-4o Vision ──
+
+def _load_openai_key() -> str:
+    key = os.environ.get("OPENAI_API_KEY", "")
+    if key:
+        return key
+    return _load_config().get("openai_api_key", "")
+
+
+def extract_with_gpt4o(
+    image_path: str,
+    api_key: str | None = None,
+    progress_cb: Callable[[int], None] | None = None,
+    prompt_override: str | None = None,
+) -> tuple[list[pd.DataFrame], dict] | None:
+    """GPT-4o로 이미지에서 표를 추출한다. 비용 최적화를 위해 low detail 사용."""
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return None
+
+    key = api_key or _load_openai_key()
+    if not key:
+        return None
+
+    if progress_cb:
+        progress_cb(10)
+
+    b64 = _image_to_base64(image_path)
+    mime = _detect_mime_type(image_path)
+    prompt = prompt_override or VISION_PROMPT
+
+    if progress_cb:
+        progress_cb(20)
+
+    client = OpenAI(api_key=key)
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime};base64,{b64}",
+                                "detail": "high",
+                            },
+                        },
+                    ],
+                }
+            ],
+            temperature=0.1,
+            max_tokens=16384,
+        )
+
+        if progress_cb:
+            progress_cb(80)
+
+        result_text = response.choices[0].message.content or ""
+        data = _parse_vision_response(result_text)
+        if not data:
+            return None
+
+        dfs, metadata = _json_to_dataframes(data)
+
+        if progress_cb:
+            progress_cb(100)
+
+        return (dfs, metadata) if dfs else None
+
+    except Exception as e:
+        print(f"[GPT-4o] 오류: {e}")
+        return None
+
+
 # ── 스프레드 열 보정 (OpenCV 격자선 기반) ──
 
 def correct_spread_placement(
@@ -769,6 +848,18 @@ def extract_with_vision(
                 result = _cross_validate(local_result, result)
         else:
             print("[Gemini] 일일 한도 초과 → 건너뜀")
+
+    # ── ⑤ GPT-4o (비용 최적화: 다른 API 모두 실패 시에만) ──
+    if not result and engine in ("auto", "gpt4o"):
+        openai_key = _load_openai_key()
+        if openai_key:
+            result = extract_with_gpt4o(
+                image_path, openai_key,
+                progress_cb=lambda p: progress_cb(80 + int(p * 0.15)) if progress_cb else None,
+                prompt_override=prompt_override,
+            )
+            if result:
+                print("[GPT-4o] 추출 성공")
 
     if not result:
         # EasyOCR 결과라도 반환
