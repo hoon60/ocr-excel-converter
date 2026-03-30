@@ -414,7 +414,7 @@ def extract_with_gpt4o(
     progress_cb: Callable[[int], None] | None = None,
     prompt_override: str | None = None,
 ) -> tuple[list[pd.DataFrame], dict] | None:
-    """GPT-4o로 이미지에서 표를 추출한다. 비용 최적화를 위해 low detail 사용."""
+    """GPT-4o-mini로 이미지에서 표를 추출한다. 비용 최적화: 이미지 축소 + high detail."""
     try:
         from openai import OpenAI
     except ImportError:

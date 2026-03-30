@@ -3,7 +3,7 @@ services:
     name: ocr-excel-converter
     runtime: python
     buildCommand: pip install -r requirements-web.txt
-    startCommand: python web_server.py
+    startCommand: gunicorn web_server:app --bind 0.0.0.0:$PORT --timeout 300
     envVars:
       - key: PORT
         value: 5000
